@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Math-Polygon-Tree
-version:            0.035
+version:            0.04
 abstract:           Class for fast check if point is inside polygon
 author:
     - liosha <liosha@cpan.org>
@@ -19,7 +19,7 @@ no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.55_02
+generated_by:       ExtUtils::MakeMaker version 6.56
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4
