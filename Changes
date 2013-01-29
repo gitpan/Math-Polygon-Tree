@@ -1,6 +1,9 @@
 Revision history for Math-Polygon-Tree
 
-0.041  2010-12-2907
+0.05   2013-01-29
+        * 'contains' returns -1 if point lays on polygon boundary (very dirty!)
+
+0.041  2010-12-29
         * added exportable functions
 
 0.04   2010-11-07

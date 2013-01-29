@@ -1,26 +1,29 @@
-
-
 package Math::Polygon::Tree;
+{
+  $Math::Polygon::Tree::VERSION = '0.05';
+}
 
-=head1 NAME
+# ABSTRACT: fast check if point is inside polygon
 
-Math::Polygon::Tree - Class for fast check if point is inside polygon
+# $Id: Tree.pm 4 2013-01-29 07:07:36Z xliosha@gmail.com $
 
-=head1 SYNOPSIS
 
-Math::Polygon::Tree creates a B-tree of polygon parts for fast check if object is inside this polygon.
-This method is effective if polygon has hundreds or more segments.
+use 5.010;
+use strict;
+use warnings;
+use utf8;
+use Carp;
 
-    use Math::Polygon::Tree;
+use base qw{ Exporter };
 
-    my $poly  = [ [0,0], [0,2], [2,2], ... ];
-    my $bound = Math::Polygon::Tree->new( $poly );
+use List::Util qw{ sum min max };
+use List::MoreUtils qw{ uniq };
 
-    if ( $bound->contains( [1,1] ) )  { ... }
+# FIXME: remove and use simple bbox clip?
+use Math::Geometry::Planar::GPC::Polygon qw{ new_gpc };
 
-=cut
 
-our $VERSION = '0.041';
+
 our @EXPORT_OK = qw{
     polygon_bbox
     polygon_centroid
@@ -29,41 +32,9 @@ our @EXPORT_OK = qw{
 
 
 
-use base qw{ Exporter };
-
-use warnings;
-use strict;
-use Carp;
-
-use List::Util qw{ sum min max };
-use List::MoreUtils qw{ uniq };
-
-# FIXME: remove and use simple bbox clip?
-use Math::Geometry::Planar::GPC::Polygon qw{ new_gpc };
-
-# use Data::Dump 'dd';
-
-
-
 my $MAX_LEAF_POINTS = 16;       # minimum 6
 
 
-=head1 METHODS
-
-=head2 new
-
-Takes polygons (at least one) and creates a tree structure. All polygons are outer, inners in not implemented.
-Polygon is a reference to array of points
-
-    my $poly1 = [ [0,0], [0,2], [2,2], ... ];   
-    ...
-    my $bound = Math::Polygon::Tree->new( $poly1, $poly2, ... );
-
-or a .poly file
-
-    my $bound = Math::Polygon::Tree->new( 'boundary.poly' );
-
-=cut
 
 sub new {
     my $class = shift;
@@ -185,14 +156,6 @@ sub new {
 }
 
 
-=head2 contains
-
-Checks if point is inside bound polygon.
-Returns 1 if point is inside polygon or 0 otherwise.
-
-    if ( $bound->contains( [1,1] ) )  { ... 
-
-=cut
 
 sub contains {
     my $self  = shift;
@@ -219,8 +182,7 @@ sub contains {
 
     if ( exists $self->{poly} ) {
         for my $poly ( @{$self->{poly}} ) {
-            return 1
-                if polygon_contains_point( $point, @$poly );
+            return polygon_contains_point( $point, @$poly );
         }
     }
 
@@ -228,14 +190,6 @@ sub contains {
 }
 
 
-=head2 contains_points
-
-Checks if points are inside bound polygon.
-Returns 1 if all points are inside polygon, 0 if all outside, or B<undef>.
-
-    if ( $bound->contains_points( [1,1], [2,2] ... ) )  { ...
-
-=cut
 
 sub contains_points {
     my $self  = shift;
@@ -257,15 +211,6 @@ sub contains_points {
 }
 
 
-=head2 contains_bbox_rough
-
-Checks if box is inside bound polygon.
-Returns 1 if box is inside polygon, 0 if box is outside polygon or B<undef> if it 'doubts'. 
-
-    my ($xmin, $ymin, $xmax, $ymax) = ( 1, 1, 2, 2 );
-    if ( $bound->contains_bbox_rough( $xmin, $ymin, $xmax, $ymax ) )  { ... }
-
-=cut
 
 sub contains_bbox_rough {
     my $self  = shift;
@@ -303,14 +248,6 @@ sub contains_bbox_rough {
 }
 
 
-=head2 contains_polygon_rough
-
-Checks if polygon is inside bound polygon.
-Returns 1 if inside, 0 if outside or B<undef> if 'doubts'. 
-
-    if ( $bound->contains_polygon_rough( [ [1,1], [1,2], [2,2], ... ] ) )  { ... }
-
-=cut
 
 sub contains_polygon_rough {
     my $self = shift;
@@ -325,13 +262,6 @@ sub contains_polygon_rough {
 
 
 
-=head2 bbox
-
-Returns polygon's bounding box. 
-
-    my ( $xmin, $ymin, $xmax, $ymax ) = $bound->bbox();
-
-=cut
 
 sub bbox {
     my $self  = shift;
@@ -341,15 +271,6 @@ sub bbox {
 
 
 
-=head1 FUNCTIONS
-
-=head2 polygon_bbox
-
-Function that returns polygon's bbox.
-
-    my ( $xmin, $ymin, $xmax, $ymax ) = polygon_bbox( [1,1], [1,2], [2,2], ... );
-
-=cut
 
 sub polygon_bbox (@) {
 
@@ -362,13 +283,6 @@ sub polygon_bbox (@) {
 }
 
 
-=head2 polygon_centroid
-
-Function that returns polygon's weightened center.
-
-    my ( $x, $y ) = polygon_centroid( [1,1], [1,2], [2,2], ... );
-
-=cut
 
 sub polygon_centroid {
 
@@ -398,12 +312,6 @@ sub polygon_centroid {
 }
 
 
-=head2 polygon_contains_point
-
-Function that tests if polygon contains point (modified one from Math::Polygon::Calc).
-Returns -1 if point lays on polygon's boundary
-
-=cut
 
 sub polygon_contains_point ($@) {
 
@@ -445,57 +353,116 @@ sub polygon_contains_point ($@) {
 1;
 
 
+__END__
+=pod
+
+=head1 NAME
+
+Math::Polygon::Tree - fast check if point is inside polygon
+
+=head1 VERSION
+
+version 0.05
+
+=head1 SYNOPSIS
+
+    use Math::Polygon::Tree;
+
+    my $poly  = [ [0,0], [0,2], [2,2], ... ];
+    my $bound = Math::Polygon::Tree->new( $poly );
+
+    if ( $bound->contains( [1,1] ) )  { ... }
+
+=head1 DESCRIPTION
+
+Math::Polygon::Tree creates a B-tree of polygon parts for fast check if object is inside this polygon.
+This method is effective if polygon has hundreds or more segments.
+
+=head1 METHODS
+
+=head2 new
+
+Takes [at least one] contour and creates a tree structure. All polygons are outer, inners in not implemented.
+
+Contour is an arrayref of points:
+
+    my $poly1 = [ [0,0], [0,2], [2,2], ... ];   
+    ...
+    my $bound = Math::Polygon::Tree->new( $poly1, $poly2, ... );
+
+or a .poly file
+
+    my $bound = Math::Polygon::Tree->new( 'boundary.poly' );
+
+=head2 contains
+
+    if ( $bound->contains( [1,1] ) )  { ... }
+
+Checks if point is inside bound polygon.
+
+Returns 1 if point is inside polygon, -1 if it lays on polygon boundary (dirty), or 0 otherwise.
+
+=head2 contains_points
+
+Checks if points are inside bound polygon.
+
+Returns 1 if all points are inside polygon, 0 if all outside, or B<undef>.
+
+    if ( $bound->contains_points( [1,1], [2,2] ... ) )  { ...
+
+=head2 contains_bbox_rough
+
+Checks if box is inside bound polygon.
+
+Returns 1 if box is inside polygon, 0 if box is outside polygon or B<undef> if it 'doubts'. 
+
+    my ($xmin, $ymin, $xmax, $ymax) = ( 1, 1, 2, 2 );
+    if ( $bound->contains_bbox_rough( $xmin, $ymin, $xmax, $ymax ) )  { ... }
+
+=head2 contains_polygon_rough
+
+Checks if polygon is inside bound polygon.
+
+Returns 1 if inside, 0 if outside or B<undef> if 'doubts'. 
+
+    if ( $bound->contains_polygon_rough( [ [1,1], [1,2], [2,2], ... ] ) )  { ... }
+
+=head2 bbox
+
+Returns polygon's bounding box. 
+
+    my ( $xmin, $ymin, $xmax, $ymax ) = $bound->bbox();
+
+=head1 FUNCTIONS
+
+=head2 polygon_bbox
+
+Function that returns polygon's bbox.
+
+    my ( $xmin, $ymin, $xmax, $ymax ) = polygon_bbox( [1,1], [1,2], [2,2], ... );
+
+=head2 polygon_centroid
+
+Function that returns polygon's weightened center.
+
+    my ( $x, $y ) = polygon_centroid( [1,1], [1,2], [2,2], ... );
+
+=head2 polygon_contains_point
+
+Function that tests if polygon contains point (modified one from Math::Polygon::Calc).
+
+Returns -1 if point lays on polygon's boundary
 
 =head1 AUTHOR
 
-liosha, C<< <liosha at cpan.org> >>
+liosha <liosha@cpan.org>
 
-=head1 BUGS
+=head1 COPYRIGHT AND LICENSE
 
-Please report any bugs or feature requests to C<bug-math-polygon-tree at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Math-Polygon-Tree>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
+This software is copyright (c) 2013 by liosha.
 
-
-=head1 SUPPORT
-
-You can find documentation for this module with the perldoc command.
-
-    perldoc Math::Polygon::Tree
-
-
-You can also look for information at:
-
-=over 4
-
-=item * RT: CPAN's request tracker
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Math-Polygon-Tree>
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/Math-Polygon-Tree>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/Math-Polygon-Tree>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/Math-Polygon-Tree/>
-
-=back
-
-
-=head1 COPYRIGHT & LICENSE
-
-Copyright 2009 liosha.
-
-This program is free software; you can redistribute it and/or modify it
-under the terms of either: the GNU General Public License as published
-by the Free Software Foundation; or the Artistic License.
-
-See http://dev.perl.org/licenses/ for more information.
-
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
 =cut
+

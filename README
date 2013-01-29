@@ -1,53 +1,13 @@
-Math-Polygon-Tree
-
-Math::Polygon::Tree is a class for fast check if object is inside 
-bounding polygon. It is effective for polygons with hundreds 
-and more segments.
-
-Required packages:
- * List::Util
- * List::MoreUtils
- * Math::Geometry::Planar::GPC::Polygon
 
 
-INSTALLATION
+This archive contains the distribution Math-Polygon-Tree,
+version 0.05:
 
-To install this module, run the following commands:
+  fast check if point is inside polygon
 
-    perl Makefile.PL
-    make
-    make test
-    make install
+This software is copyright (c) 2013 by liosha.
 
-SUPPORT AND DOCUMENTATION
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
-After installing, you can find documentation for this module with the
-perldoc command.
-
-    perldoc Math::Polygon::Tree
-
-You can also look for information at:
-
-    RT, CPAN's request tracker
-        http://rt.cpan.org/NoAuth/Bugs.html?Dist=Math-Polygon-Tree
-
-    AnnoCPAN, Annotated CPAN documentation
-        http://annocpan.org/dist/Math-Polygon-Tree
-
-    CPAN Ratings
-        http://cpanratings.perl.org/d/Math-Polygon-Tree
-
-    Search CPAN
-        http://search.cpan.org/dist/Math-Polygon-Tree/
-
-
-COPYRIGHT AND LICENCE
-
-Copyright (C) 2009 liosha
-
-This program is free software; you can redistribute it and/or modify it
-under the terms of either: the GNU General Public License as published
-by the Free Software Foundation; or the Artistic License.
-
-See http://dev.perl.org/licenses/ for more information.
 
