@@ -1,11 +1,11 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.05';
+  $Math::Polygon::Tree::VERSION = '0.06';
 }
 
 # ABSTRACT: fast check if point is inside polygon
 
-# $Id: Tree.pm 4 2013-01-29 07:07:36Z xliosha@gmail.com $
+# $Id: Tree.pm 17 2013-02-08 10:11:19Z xliosha@gmail.com $
 
 
 use 5.010;
@@ -16,10 +16,11 @@ use Carp;
 
 use base qw{ Exporter };
 
-use List::Util qw{ sum min max };
-use List::MoreUtils qw{ uniq };
+use List::Util qw{ reduce first sum min max };
+use List::MoreUtils qw{ all };
+use POSIX qw/ floor ceil /;
 
-# FIXME: remove and use simple bbox clip?
+# todo: remove gpc and use simple bbox clip
 use Math::Geometry::Planar::GPC::Polygon qw{ new_gpc };
 
 
@@ -32,179 +33,185 @@ our @EXPORT_OK = qw{
 
 
 
-my $MAX_LEAF_POINTS = 16;       # minimum 6
+# tree options
+
+our $MAX_LEAF_POINTS = 16;
+our $SLICE_FIELD = 0.0001;
+our $SLICE_NUM_COEF = 2;
+our $SLICE_NUM_SPEED_COEF = 1;
 
 
 
 sub new {
-    my $class = shift;
-    my $self  = {};
+    my ($class, @in_contours) = @_;
+    my $self = bless {}, $class;
 
     ##  load and close polys, calc bbox
-    while ( my $chain_ref = shift ) {
+    my @contours;
+    while ( @in_contours ) {
+        my $contour = shift @in_contours;
 
-        if ( ref $chain_ref ) {
-            croak "Polygon should be a reference to array of points" 
-                unless ref $chain_ref eq 'ARRAY';
-        
-            my @epoint = ();
-            push @epoint, $chain_ref->[0]
-                unless  $chain_ref->[0]->[0] == $chain_ref->[-1]->[0]
-                    &&  $chain_ref->[0]->[1] == $chain_ref->[-1]->[1];
-
-            my $poly = [ @$chain_ref, @epoint ];
-            push @{$self->{poly}}, $poly;
-
-            my ($xmin, $ymin, $xmax, $ymax) = polygon_bbox( @$poly );
-
-            $self->{xmin} = $xmin       if  !(exists $self->{xmin})  ||  $xmin < $self->{xmin};
-            $self->{xmax} = $xmax       if  !(exists $self->{xmax})  ||  $xmax > $self->{xmax};
-            $self->{ymin} = $ymin       if  !(exists $self->{ymin})  ||  $ymin < $self->{ymin};
-            $self->{ymax} = $ymax       if  !(exists $self->{ymax})  ||  $ymax > $self->{ymax};
+        if ( ref $contour ne 'ARRAY' ) {
+            unshift @in_contours, read_poly_file($contour);
+            next;
         }
-        else {
 
-            open my $in, '<', $chain_ref
-                or croak "Couldn't open $chain_ref: $!";
+        my @points = @$contour;
+        push @points, $points[0]  if !( $points[0] ~~ $points[-1] );
 
-            my @bound;
-            my $pid;
+        push @contours, \@points;
 
-            while ( my $line = readline $in ) {
-                if ( $line =~ /^(-?\d+)/ ) {
-                    $pid = $1;
-                }
-                elsif ( $line =~ /^\s+([0-9.Ee+-]+)\s+([0-9.Ee+-]+)/ ) {
-                    push @bound, [ $1+0, $2+0 ];
-                }
-                elsif ( $line =~ /^END/  &&  $pid < 0 ) {
-                    @bound = ();
-                }
-                elsif ( $line =~ /^END/  &&  @bound ) {
+        my $bbox = polygon_bbox(\@points);
+        $self->{bbox} = bbox_union($bbox, $self->{bbox});
+    }
 
-                    push @bound, $bound[0] 
-                        unless  $bound[0]->[0] == $bound[-1]->[0]
-                            &&  $bound[0]->[1] == $bound[-1]->[1];
-                    push @{$self->{poly}}, [ @bound ];
+    croak "No contours"  if !@contours;
 
-                    my ($xmin, $ymin, $xmax, $ymax) = polygon_bbox( @bound );
+    my $nrpoints = sum map { scalar @$_ } @contours;
 
-                    $self->{xmin} = $xmin       if  !(exists $self->{xmin})  ||  $xmin < $self->{xmin};
-                    $self->{xmax} = $xmax       if  !(exists $self->{xmax})  ||  $xmax > $self->{xmax};
-                    $self->{ymin} = $ymin       if  !(exists $self->{ymin})  ||  $ymin < $self->{ymin};
-                    $self->{ymax} = $ymax       if  !(exists $self->{ymax})  ||  $ymax > $self->{ymax};
+    # small polygon - no need to slice
+    if ( $nrpoints <= $MAX_LEAF_POINTS ) {
+        $self->{poly} = \@contours;
+        return $self;
+    }
 
-                    @bound = ();
-                }
+
+    # calc number of pieces (need to tune!)
+    my ($xmin, $ymin, $xmax, $ymax) = @{$self->{bbox}};
+    my $xy_ratio = ($xmax-$xmin) / ($ymax-$ymin);
+    my $nparts = $SLICE_NUM_COEF * log( exp(1) * ($nrpoints/$MAX_LEAF_POINTS)**$SLICE_NUM_SPEED_COEF );
+
+    my $x_parts = $self->{x_parts} = ceil( sqrt($nparts * $xy_ratio) );
+    my $y_parts = $self->{y_parts} = ceil( sqrt($nparts / $xy_ratio) );
+    my $x_size  = $self->{x_size}  = ($xmax-$xmin) / $x_parts;
+    my $y_size  = $self->{y_size}  = ($ymax-$ymin) / $y_parts;
+
+
+    # slice
+    my $subparts = $self->{subparts} = [];
+    
+    my $gpc_poly = new_gpc();
+    $gpc_poly->add_polygon( $_, 0 )  for @contours;
+    
+    for my $j ( 0 .. $y_parts-1 ) {
+        for my $i ( 0 .. $x_parts ) {
+
+            my $x0 = $xmin + ($i  -$SLICE_FIELD)*$x_size;
+            my $y0 = $ymin + ($j  -$SLICE_FIELD)*$y_size;
+            my $x1 = $xmin + ($i+1+$SLICE_FIELD)*$x_size;
+            my $y1 = $ymin + ($j+1+$SLICE_FIELD)*$y_size;
+
+            my $gpc_slice = new_gpc();
+            $gpc_slice->add_polygon([ [$x0,$y0],  [$x0,$y1], [$x1,$y1], [$x1,$y0], [$x0,$y0] ], 0);
+
+            my @slice_parts = $gpc_poly->clip_to($gpc_slice, 'INTERSECT')->get_polygons();
+
+            # empty part
+            if ( !@slice_parts ) {
+                $subparts->[$i]->[$j] = 0;
+                next;
             }
 
-            close $in;
+            # filled part
+            if (
+                @slice_parts == 1 && @{$slice_parts[0]} == 4
+                && all { $_->[0] ~~ [$x0,$x1] && $_->[1] ~~ [$y0,$y1] } @{$slice_parts[0]}
+            ) {
+                $subparts->[$i]->[$j] = 1;
+                next;
+            }
+
+            # complex subpart
+            $subparts->[$i]->[$j] = Math::Polygon::Tree->new(@slice_parts);
         }
     }
 
-    my $nrpoints = sum map { scalar @$_ } @{$self->{poly}};
-
-    ##  full square?
-    if ( $nrpoints == 5 ) {
-        my $poly = $self->{poly}->[0];
-        my @xs = uniq map { $_->[0] } @$poly;
-        my @ys = uniq map { $_->[1] } @$poly;
-
-        if ( @xs == 2  &&  @ys == 2 ) {
-            $self->{full} = 1;
-        }
-    }
-
-    ##  branch if big poly
-    if ( $nrpoints > $MAX_LEAF_POINTS ) {
-        # 0 - horisontal split, 1 - vertical
-        $self->{hv}  =  my $hv  =  ($self->{xmax}-$self->{xmin}) < ($self->{ymax}-$self->{ymin});
-        $self->{avg} =  my $avg =  $hv  ?  ($self->{ymax}+$self->{ymin})/2  :  ($self->{xmax}+$self->{xmin})/2;
-
-        my $gpc = new_gpc();
-        for my $poly ( @{$self->{poly}} ) {
-            $gpc->add_polygon( $poly, 0 );
-        }
-
-        my $part1_gpc = new_gpc();
-        $part1_gpc->add_polygon( [
-                [ $self->{xmin}, $self->{ymin} ],
-                $hv  ?  [ $self->{xmin}, $avg          ]  :  [ $self->{xmin}, $self->{ymax} ],
-                $hv  ?  [ $self->{xmax}, $avg          ]  :  [ $avg         , $self->{ymax} ],
-                $hv  ?  [ $self->{xmax}, $self->{ymin} ]  :  [ $avg         , $self->{ymin} ],
-                [ $self->{xmin}, $self->{ymin} ],
-            ], 0 );
-        $part1_gpc = $gpc->clip_to( $part1_gpc, 'INTERSECT' );
-        $self->{part1} = Math::Polygon::Tree->new( $part1_gpc->get_polygons() );
-
-        my $part2_gpc = new_gpc();
-        $part2_gpc->add_polygon( [
-                [ $self->{xmax}, $self->{ymax} ],
-                $hv  ?  [ $self->{xmax}, $avg          ]  :  [ $self->{xmax}, $self->{ymin} ],
-                $hv  ?  [ $self->{xmin}, $avg          ]  :  [ $avg         , $self->{ymin} ],
-                $hv  ?  [ $self->{xmin}, $self->{ymax} ]  :  [ $avg         , $self->{ymax} ],
-                [ $self->{xmax}, $self->{ymax} ],
-            ], 0 );
-        $part2_gpc = $gpc->clip_to( $part2_gpc, 'INTERSECT' );
-        $self->{part2} = Math::Polygon::Tree->new( $part2_gpc->get_polygons() );
-
-        delete $self->{poly};
-    }
-
-    bless ($self, $class);
     return $self;
 }
 
 
 
+sub read_poly_file {
+    my ($file) = @_;
+
+    my $need_to_open = !ref $file || ref $file eq 'SCALAR';
+    my $fh = $need_to_open
+        ? do { open my $in, '<', $file  or croak "Couldn't open $file: $@"; $in }
+        : $file;
+
+    my @contours;
+    my $pid;
+    my @cur_points;
+    while ( my $line = readline $fh ) {
+        # new contour
+        if ( $line =~ /^([\-\!]?) (\d+)/x ) {
+            $pid = $1 ? -$2 : $2;
+            next;
+        }
+
+        # point
+        if ( $line =~ /^\s+([0-9.Ee+-]+)\s+([0-9.Ee+-]+)/ ) {
+            push @cur_points, [ $1+0, $2+0 ];
+            next;
+        }
+
+        # !!! inner contour - skipping
+        if ( $line =~ /^END/  &&  $pid < 0 ) {
+            @cur_points = ();
+            next;
+        }
+
+        # outer contour
+        if ( $line =~ /^END/  &&  @cur_points ) {
+            push @contours, [ @cur_points ];
+            @cur_points = ();
+            next;
+        }
+    }
+
+    close $fh  if $need_to_open;
+    return @contours;
+}
+
+
+
 sub contains {
-    my $self  = shift;
-    my $point = shift;
-    croak "Point should be a reference" 
-        unless ref $point;
+    my ($self, $point) = @_;
 
+    croak "Point should be a reference"  if ref $point ne 'ARRAY';
+
+    # check bbox
     my ($px, $py) = @$point;
+    my ($xmin, $ymin, $xmax, $ymax) = @{ $self->{bbox} };
+    return 0  if $px < $xmin  ||  $px > $xmax  ||  $py < $ymin  ||  $py > $ymax;
 
-    return 0
-        if      $px < $self->{xmin}  ||  $px > $self->{xmax}
-            ||  $py < $self->{ymin}  ||  $py > $self->{ymax};
-
-    return $self->{full}    if  exists $self->{full};
-
-    if ( exists $self->{hv} ) {
-        if ( $point->[$self->{hv}] < $self->{avg} ) {
-            return $self->{part1}->contains( $point );
-        }
-        else {
-            return $self->{part2}->contains( $point );
-        }
-    }
-
+    # leaf
     if ( exists $self->{poly} ) {
-        for my $poly ( @{$self->{poly}} ) {
-            return polygon_contains_point( $point, @$poly );
-        }
+        my $result = first {$_} map {polygon_contains_point($point, $_)} @{$self->{poly}};
+        return $result // 0;
     }
 
-    return 0;
+    # branch
+    my $i = floor( ($px-$xmin) / $self->{x_size} );
+    my $j = floor( ($py-$ymin) / $self->{y_size} );
+
+    my $subpart = $self->{subparts}->[$i]->[$j];
+    return $subpart  if !ref $subpart;
+    return $subpart->contains($point);
 }
 
 
 
 sub contains_points {
-    my $self  = shift;
-    my $result = undef;
-    
-    while ( my $point = shift ) {
-        next unless ref $point;
+    my ($self, @points) = @_;
 
-        my $isin = abs $self->contains( $point );
-        if ( defined $result ) {
-            return undef  unless  $isin == $result;
-        }
-        else {
-            $result = $isin;
-        }
+    my $iter_list = @points==1 && ref $points[0]->[0]  ? $points[0]  : \@points;
+
+    my $result;
+    for my $point ( @$iter_list ) {
+        my $point_result = 0 + !!$self->contains($point);
+        return undef  if defined $result && $point_result != $result;
+        $result = $point_result;
     }
 
     return $result;
@@ -213,119 +220,130 @@ sub contains_points {
 
 
 sub contains_bbox_rough {
-    my $self  = shift;
-    croak "Box should be 4 values xmin, ymin, xmax, ymax"
-        unless @_ == 4;
+    my ($self, @bbox)  = @_;
+    my $bbox = ref $bbox[0] ? $bbox[0] : \@bbox;
 
-    my ($xmin, $ymin, $xmax, $ymax) = @_;
+    croak "Box should be 4 values array: xmin, ymin, xmax, ymax" if @$bbox != 4;
 
-    return 0
-        if   $xmax < $self->{xmin}  ||  $xmin > $self->{xmax}
-         ||  $ymax < $self->{ymin}  ||  $ymin > $self->{ymax};
+    my ($x0, $y0, $x1, $y1) = @$bbox;
+    my ($xmin, $ymin, $xmax, $ymax) = @{$self->{bbox}};
 
-    if (  $xmin > $self->{xmin}  &&  $xmax < $self->{xmax}
-      &&  $ymin > $self->{ymin}  &&  $ymax < $self->{ymax} ) {
+    # completely outside bbox
+    return 0       if    $x1 < $xmin  ||  $x0 > $xmax  ||  $y0 < $ymin  ||  $y1 > $ymax;
 
-        return $self->{full}    if  exists $self->{full};
+    # partly inside
+    return undef   if !( $x0 > $xmin  &&  $x1 < $xmax  &&  $y0 > $ymin  &&  $y1 < $ymax );
 
-        if ( exists $self->{hv} ) {
-            if ( $self->{hv} ) {
-                return $self->{part1}->contains_bbox_rough( @_ )
-                    if  $ymax < $self->{avg}; 
-                return $self->{part2}->contains_bbox_rough( @_ )
-                    if  $ymin > $self->{avg}; 
-            }
-            else {
-                return $self->{part1}->contains_bbox_rough( @_ )
-                    if  $xmax < $self->{avg}; 
-                return $self->{part2}->contains_bbox_rough( @_ )
-                    if  $xmin > $self->{avg}; 
-            }
-        }
-    }
+    return undef   if !$self->{subparts};
 
-    return undef;     
+    # lays in defferent subparts 
+    my $i0 = floor( ($x0-$xmin) / $self->{x_size} );
+    my $i1 = floor( ($x1-$xmin) / $self->{x_size} );
+    return undef if $i0 != $i1;
+ 
+    my $j0 = floor( ($y0-$ymin) / $self->{y_size} );
+    my $j1 = floor( ($y1-$ymin) / $self->{y_size} );
+    return undef if $j0 != $j1;
+
+    my $subpart = $self->{subparts}->{$i0}->{$j0};
+    return $subpart  if !ref $subpart;
+    return $subpart->contains_bbox_rough($bbox);
 }
 
 
 
 sub contains_polygon_rough {
-    my $self = shift;
-    my $poly = shift; 
+    my ($self, $poly) = @_; 
+    croak "Polygon should be a reference to array of points" if ref $poly ne 'ARRAY';
 
-    croak "Polygon should be a reference to array of points" 
-        unless ref $poly;
-
-    my @bbox = polygon_bbox( @$poly );
-    return $self->contains_bbox_rough( @bbox );
+    return $self->contains_bbox_rough( polygon_bbox($poly) );
 }
-
 
 
 
 sub bbox {
-    my $self  = shift;
-    return ( $self->{xmin}, $self->{ymin}, $self->{xmax}, $self->{ymax} );
+    return shift()->{bbox};
 }
 
 
 
 
+sub polygon_bbox {
+    my ($contour) = @_;
 
-sub polygon_bbox (@) {
+    return bbox_union(@$contour) if @$contour <= 2;
+    return reduce { bbox_union($a, $b) } @$contour;
+}
 
-    return (
-        ( min map { $_->[0] } @_ ),
-        ( min map { $_->[1] } @_ ),
-        ( max map { $_->[0] } @_ ),
-        ( max map { $_->[1] } @_ ),
+
+
+sub bbox_union {
+    my ($bbox1, $bbox2) = @_;
+
+    $bbox2 //= $bbox1;
+
+    my @bbox = (
+        min( $bbox1->[0], $bbox2->[0] ),
+        min( $bbox1->[1], $bbox2->[1] ),
+        max( $bbox1->[2] // $bbox1->[0], $bbox2->[2] // $bbox2->[0] ),
+        max( $bbox1->[3] // $bbox1->[1], $bbox2->[3] // $bbox2->[1] ),
     );
+
+    return \@bbox;
 }
 
 
 
 sub polygon_centroid {
+    my (@poly) = @_;
+    my $contour = ref $poly[0]->[0] ? $poly[0] : \@poly;
 
-    my $slat = 0;
-    my $slon = 0;
-    my $ssq  = 0;
+    return $contour->[0]  if @$contour < 2;
 
-    for my $i ( 1 .. $#_-1 ) {
-        my $tlon = ( $_[0]->[0] + $_[$i]->[0] + $_[$i+1]->[0] ) / 3;
-        my $tlat = ( $_[0]->[1] + $_[$i]->[1] + $_[$i+1]->[1] ) / 3;
+    my $sx = 0;
+    my $sy = 0;
+    my $sq = 0;
 
-        my $tsq = ( ( $_[$i]  ->[0] - $_[0]->[0] ) * ( $_[$i+1]->[1] - $_[0]->[1] )
-                  - ( $_[$i+1]->[0] - $_[0]->[0] ) * ( $_[$i]  ->[1] - $_[0]->[1] ) );
+    my $p0 = $contour->[0];
+    for my $i ( 1 .. $#$contour-1 ) {
+        my $p  = $contour->[$i];
+        my $p1 = $contour->[$i+1];
 
-        $slat += $tlat * $tsq;
-        $slon += $tlon * $tsq;
-        $ssq  += $tsq;
+        my $tsq = ( ( $p->[0]  - $p0->[0] ) * ( $p1->[1] - $p0->[1] )
+                  - ( $p1->[0] - $p0->[0] ) * ( $p->[1]  - $p0->[1] ) );
+        next if $tsq == 0;
+        
+        my $tx = ( $p0->[0] + $p->[0] + $p1->[0] ) / 3;
+        my $ty = ( $p0->[1] + $p->[1] + $p1->[1] ) / 3;
+
+        $sx += $tx * $tsq;
+        $sy += $ty * $tsq;
+        $sq += $tsq;
     }
 
-    if ( $ssq == 0 ) {
-        return (
-            ((min map { $_->[0] } @_) + (max map { $_->[0] } @_)) / 2,
-            ((min map { $_->[1] } @_) + (max map { $_->[1] } @_)) / 2 );
+    if ( $sq == 0 ) {
+        my $bbox = polygon_bbox($contour);
+        return [ ($bbox->[0]+$bbox->[2])/2, ($bbox->[1]+$bbox->[3])/2 ];
     }
 
-    return ( $slon/$ssq , $slat/$ssq );
+    return [$sx/$sq, $sy/$sq];
 }
 
 
 
-sub polygon_contains_point ($@) {
+sub polygon_contains_point {
+    my ($point, @poly) = @_;
+    my $contour = ref $poly[0]->[0] ? $poly[0] : \@poly;
 
-    my $point = shift;
-
-    my ( $x,  $y)  =  @$point;
-    my ($px, $py)  =  @{ (shift) };
+    my ($x, $y) = @$point;
+    my ($px, $py) = @{ $contour->[0] };
     my ($nx, $ny);
 
     my $inside = 0;
 
-    while( @_ ) {
-        ($nx, $ny) =  @{ (shift) };
-        
+    for my $i ( 1 .. scalar @$contour ) { 
+        ($nx, $ny) =  @{ $contour->[ $i % scalar @$contour ] };
+
         return -1
             if  $y == $py  &&  $py == $ny
                 && ( $x >= $px  ||  $x >= $nx )
@@ -362,7 +380,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.05
+version 0.06
 
 =head1 SYNOPSIS
 
@@ -375,14 +393,15 @@ version 0.05
 
 =head1 DESCRIPTION
 
-Math::Polygon::Tree creates a B-tree of polygon parts for fast check if object is inside this polygon.
+Math::Polygon::Tree creates a tree of polygon parts for fast check if object is inside this polygon.
 This method is effective if polygon has hundreds or more segments.
 
 =head1 METHODS
 
 =head2 new
 
-Takes [at least one] contour and creates a tree structure. All polygons are outer, inners in not implemented.
+Takes contours and creates a tree structure.
+All polygons are outers, inners are not implemented.
 
 Contour is an arrayref of points:
 
@@ -392,32 +411,38 @@ Contour is an arrayref of points:
 
 or a .poly file
 
-    my $bound = Math::Polygon::Tree->new( 'boundary.poly' );
+    my $bound1 = Math::Polygon::Tree->new( \*STDIN );
+    my $bound2 = Math::Polygon::Tree->new( 'boundary.poly' );
 
 =head2 contains
 
-    if ( $bound->contains( [1,1] ) )  { ... }
+    my $is_inside = $bound->contains( [1,1] );
+    if ( $is_inside ) { ... }
 
 Checks if point is inside bound polygon.
 
-Returns 1 if point is inside polygon, -1 if it lays on polygon boundary (dirty), or 0 otherwise.
+Returns 1 if point is inside polygon, -1 if it lays on polygon boundary, or 0 otherwise.
 
 =head2 contains_points
 
-Checks if points are inside bound polygon.
+    # list of points
+    if ( $bound->contains_points( [1,1], [2,2] ... ) )  { ... }
 
-Returns 1 if all points are inside polygon, 0 if all outside, or B<undef>.
+    # arrayref of points
+    if ( $bound->contains_points( [[1,1], [2,2] ...] ) )  { ... }
 
-    if ( $bound->contains_points( [1,1], [2,2] ... ) )  { ...
+Checks if all points are inside or outside polygon.
+
+Returns 1 if all points are inside polygon, 0 if all outside, or B<undef> otherwise.
 
 =head2 contains_bbox_rough
 
-Checks if box is inside bound polygon.
+Rough check if box is inside bound polygon.
 
 Returns 1 if box is inside polygon, 0 if box is outside polygon or B<undef> if it 'doubts'. 
 
-    my ($xmin, $ymin, $xmax, $ymax) = ( 1, 1, 2, 2 );
-    if ( $bound->contains_bbox_rough( $xmin, $ymin, $xmax, $ymax ) )  { ... }
+    my $bbox = [ 1, 1, 2, 2 ];
+    if ( $bound->contains_bbox_rough( $bbox ) )  { ... }
 
 =head2 contains_polygon_rough
 
@@ -429,25 +454,44 @@ Returns 1 if inside, 0 if outside or B<undef> if 'doubts'.
 
 =head2 bbox
 
-Returns polygon's bounding box. 
+    my $bbox = $bound->bbox();
+    my ($xmin, $ymin, $xmax, $ymax) = @$bbox;
 
-    my ( $xmin, $ymin, $xmax, $ymax ) = $bound->bbox();
+Returns polygon's bounding box.
 
 =head1 FUNCTIONS
 
+=head2 read_poly_file
+
+    my @contours = read_poly_file( \*STDIN );
+    my @contours = read_poly_file( 'bound.poly' )
+
+Reads content of .poly-file. See http://wiki.openstreetmap.org/wiki/.poly
+
 =head2 polygon_bbox
 
-Function that returns polygon's bbox.
+    my $bbox = polygon_bbox( [[1,1], [1,2], [2,2], ... ] );
+    my ($xmin, $ymin, $xmax, $ymax) = @$bbox;
 
-    my ( $xmin, $ymin, $xmax, $ymax ) = polygon_bbox( [1,1], [1,2], [2,2], ... );
+Returns polygon's bounding box.
+
+=head2 bbox_union
+
+    my $united_bbox = bbox_union($bbox1, $bbox2);
+
+Returns united bbox for two bboxes/points.
 
 =head2 polygon_centroid
 
-Function that returns polygon's weightened center.
+    my $center_point = polygon_centroid( [ [1,1], [1,2], [2,2], ... ] );
 
-    my ( $x, $y ) = polygon_centroid( [1,1], [1,2], [2,2], ... );
+Returns polygon's weightened center.
+
+Math::Polygon 1.02+ has the same function, but it is very inaccurate.
 
 =head2 polygon_contains_point
+
+    my $is_inside = polygon_contains_point($point, $polygon);
 
 Function that tests if polygon contains point (modified one from Math::Polygon::Calc).
 
