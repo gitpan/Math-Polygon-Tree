@@ -1,11 +1,11 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.06';
+  $Math::Polygon::Tree::VERSION = '0.061';
 }
 
 # ABSTRACT: fast check if point is inside polygon
 
-# $Id: Tree.pm 17 2013-02-08 10:11:19Z xliosha@gmail.com $
+# $Id: Tree.pm 20 2013-02-08 12:12:48Z xliosha@gmail.com $
 
 
 use 5.010;
@@ -31,6 +31,7 @@ our @EXPORT_OK = qw{
     polygon_contains_point
 };
 
+our %EXPORT_TAGS = ( all => \@EXPORT_OK );
 
 
 # tree options
@@ -192,8 +193,8 @@ sub contains {
     }
 
     # branch
-    my $i = floor( ($px-$xmin) / $self->{x_size} );
-    my $j = floor( ($py-$ymin) / $self->{y_size} );
+    my $i = min( floor( ($px-$xmin) / $self->{x_size} ), $self->{x_parts}-1 );
+    my $j = min( floor( ($py-$ymin) / $self->{y_size} ), $self->{y_parts}-1 );
 
     my $subpart = $self->{subparts}->[$i]->[$j];
     return $subpart  if !ref $subpart;
@@ -237,15 +238,15 @@ sub contains_bbox_rough {
     return undef   if !$self->{subparts};
 
     # lays in defferent subparts 
-    my $i0 = floor( ($x0-$xmin) / $self->{x_size} );
-    my $i1 = floor( ($x1-$xmin) / $self->{x_size} );
+    my $i0 = min( floor( ($x0-$xmin) / $self->{x_size} ), $self->{x_parts}-1 );
+    my $i1 = min( floor( ($x1-$xmin) / $self->{x_size} ), $self->{x_parts}-1 );
     return undef if $i0 != $i1;
  
-    my $j0 = floor( ($y0-$ymin) / $self->{y_size} );
-    my $j1 = floor( ($y1-$ymin) / $self->{y_size} );
+    my $j0 = min( floor( ($y0-$ymin) / $self->{y_size} ), $self->{y_parts}-1 );
+    my $j1 = min( floor( ($y1-$ymin) / $self->{y_size} ), $self->{y_parts}-1 );
     return undef if $j0 != $j1;
 
-    my $subpart = $self->{subparts}->{$i0}->{$j0};
+    my $subpart = $self->{subparts}->[$i0]->[$j0];
     return $subpart  if !ref $subpart;
     return $subpart->contains_bbox_rough($bbox);
 }
@@ -380,7 +381,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.06
+version 0.061
 
 =head1 SYNOPSIS
 
