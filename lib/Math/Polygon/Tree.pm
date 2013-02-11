@@ -1,6 +1,6 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.061';
+  $Math::Polygon::Tree::VERSION = '0.062';
 }
 
 # ABSTRACT: fast check if point is inside polygon
@@ -35,11 +35,13 @@ our %EXPORT_TAGS = ( all => \@EXPORT_OK );
 
 
 # tree options
-
 our $MAX_LEAF_POINTS = 16;
 our $SLICE_FIELD = 0.0001;
 our $SLICE_NUM_COEF = 2;
 our $SLICE_NUM_SPEED_COEF = 1;
+
+# floating-point comparsion accuracy
+our $POLYGON_BORDER_WIDTH = 1e-9;
 
 
 
@@ -346,22 +348,22 @@ sub polygon_contains_point {
         ($nx, $ny) =  @{ $contour->[ $i % scalar @$contour ] };
 
         return -1
-            if  $y == $py  &&  $py == $ny
+            if  abs($y-$py) < $POLYGON_BORDER_WIDTH  &&  abs($py-$ny) < $POLYGON_BORDER_WIDTH
                 && ( $x >= $px  ||  $x >= $nx )
                 && ( $x <= $px  ||  $x <= $nx );
 
-        next    if  $py == $ny;
+        next    if  abs($py-$ny) < $POLYGON_BORDER_WIDTH;
         next    if  $y < $py  &&  $y < $ny;
         next    if  $y > $py  &&  $y > $ny;
         next    if  $x > $px  &&  $x > $nx;
 
         my $xx = ($y-$py)*($nx-$px)/($ny-$py)+$px;
-        return -1   if  $x == $xx;
+        return -1   if  abs($x-$xx) < $POLYGON_BORDER_WIDTH;
 
         next    if  $y <= $py  &&  $y <= $ny;
 
         $inside = 1 - $inside
-            if  $px == $nx  ||  $x < $xx;
+            if  abs($px-$nx)<$POLYGON_BORDER_WIDTH  ||  $x < $xx;
     }
     continue { ($px, $py) = ($nx, $ny); }
 
@@ -381,7 +383,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.061
+version 0.062
 
 =head1 SYNOPSIS
 
