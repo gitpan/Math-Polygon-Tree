@@ -1,11 +1,11 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.066';
+  $Math::Polygon::Tree::VERSION = '0.067';
 }
 
 # ABSTRACT: fast check if point is inside polygon
 
-# $Id: Tree.pm 22 2013-02-12 09:58:27Z xliosha@gmail.com $
+# $Id: Tree.pm 23 2013-02-12 14:01:52Z xliosha@gmail.com $
 
 
 use 5.010;
@@ -82,7 +82,7 @@ sub new {
             my ($x0, $y0, $x1, $y1) = @{ $self->{bbox} };
             for my $c ( @contours ) {
                 for my $i ( 0 .. $#$c-1 ) {
-                    my ($h, $j, $k) = ( ($i>0 ? $i-1 : -2), $i+1, ($i<$#$c-1 ? $i+2 : 0) );
+                    my ($h, $j, $k) = ( ($i>0 ? $i-1 : -2), ($i+1) % $#$c , ($i+2) % $#$c );
 
                     if (
                            $c->[$h]->[1] == $c->[$i]->[1]
@@ -446,7 +446,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.066
+version 0.067
 
 =head1 SYNOPSIS
 
