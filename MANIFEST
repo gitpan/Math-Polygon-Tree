@@ -9,6 +9,7 @@ lib/Math/Polygon/Tree.pm
 t/bbox_union.t
 t/contains.t
 t/contains_points.t
+t/contains_rough.t
 t/polygon_bbox.t
 t/polygon_centroid.t
 t/release-pod-coverage.t

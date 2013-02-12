@@ -1,11 +1,11 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.062';
+  $Math::Polygon::Tree::VERSION = '0.065';
 }
 
 # ABSTRACT: fast check if point is inside polygon
 
-# $Id: Tree.pm 20 2013-02-08 12:12:48Z xliosha@gmail.com $
+# $Id: Tree.pm 21 2013-02-12 07:02:05Z xliosha@gmail.com $
 
 
 use 5.010;
@@ -17,7 +17,7 @@ use Carp;
 use base qw{ Exporter };
 
 use List::Util qw{ reduce first sum min max };
-use List::MoreUtils qw{ all };
+use List::MoreUtils qw{ all any first_index };
 use POSIX qw/ floor ceil /;
 
 # todo: remove gpc and use simple bbox clip
@@ -47,6 +47,7 @@ our $POLYGON_BORDER_WIDTH = 1e-9;
 
 sub new {
     my ($class, @in_contours) = @_;
+    my %opt = ref $in_contours[-1] eq 'HASH' ? %{pop @in_contours} : ();
     my $self = bless {}, $class;
 
     ##  load and close polys, calc bbox
@@ -75,6 +76,36 @@ sub new {
     # small polygon - no need to slice
     if ( $nrpoints <= $MAX_LEAF_POINTS ) {
         $self->{poly} = \@contours;
+
+        # find some filled bboxes for rough checks
+        if ( $opt{prepare_rough} ) {
+            my ($x0, $y0, $x1, $y1) = @{ $self->{bbox} };
+            for my $contour ( @contours ) {
+                my $i00 = first_index { $_->[0] == $x0  &&  $_->[1] == $y0 } @$contour;
+                my $i01 = first_index { $_->[0] == $x0  &&  $_->[1] == $y1 } @$contour;
+                my $i10 = first_index { $_->[0] == $x1  &&  $_->[1] == $y0 } @$contour;
+                my $i11 = first_index { $_->[0] == $x1  &&  $_->[1] == $y1 } @$contour;
+
+                my @near = ( 1, scalar @$contour - 2 );
+                if ( $i00 >= 0 && $i01 >= 0 && abs($i00-$i01) ~~ \@near ) {
+                    my $x = min grep {$_ > $x0} map {$_->[0]} @$contour;
+                    push @{ $self->{filled_bboxes} }, [$x0, $y0, $x, $y1];
+                }
+                if ( $i10 >= 0 && $i11 >= 0 && abs($i10-$i11) ~~ \@near ) {
+                    my $x = max grep {$_ < $x1} map {$_->[0]} @$contour;
+                    push @{ $self->{filled_bboxes} }, [$x, $y0, $x1, $y1];
+                }
+                if ( $i00 >= 0 && $i10 >= 0 && abs($i00-$i10) ~~ \@near ) {
+                    my $y = min grep {$_ > $y0} map {$_->[1]} @$contour;
+                    push @{ $self->{filled_bboxes} }, [$x0, $y0, $x1, $y];
+                }
+                if ( $i01 >= 0 && $i11 >= 0 && abs($i01-$i11) ~~ \@near ) {
+                    my $y = max grep {$_ < $y1} map {$_->[1]} @$contour;
+                    push @{ $self->{filled_bboxes} }, [$x0, $y, $x1, $y1];
+                }
+            }
+        }
+
         return $self;
     }
 
@@ -125,12 +156,13 @@ sub new {
             }
 
             # complex subpart
-            $subparts->[$i]->[$j] = Math::Polygon::Tree->new(@slice_parts);
+            $subparts->[$i]->[$j] = Math::Polygon::Tree->new( @slice_parts, (%opt ? \%opt : ()) );
         }
     }
 
     return $self;
 }
+
 
 
 
@@ -224,6 +256,7 @@ sub contains_points {
 
 sub contains_bbox_rough {
     my ($self, @bbox)  = @_;
+    my %opt = ref $bbox[-1] eq 'HASH' ? %{pop @bbox} : ();
     my $bbox = ref $bbox[0] ? $bbox[0] : \@bbox;
 
     croak "Box should be 4 values array: xmin, ymin, xmax, ymax" if @$bbox != 4;
@@ -237,7 +270,20 @@ sub contains_bbox_rough {
     # partly inside
     return undef   if !( $x0 > $xmin  &&  $x1 < $xmax  &&  $y0 > $ymin  &&  $y1 < $ymax );
 
-    return undef   if !$self->{subparts};
+    if ( !$self->{subparts} ) {
+        for my $fbbox ( @{ $self->{filled_bboxes} || [] } ) {
+            my ($fx0, $fy0, $fx1, $fy1) = @$fbbox;
+            return 1  if $x0>=$fx0 && $y0>=$fy0 && $x1<=$fx1 && $y1<=$fy1;
+        }
+
+        return undef if !$opt{inaccurate};
+
+        my @points = ( [$x0,$y0], [$x0,$y1], [$x1,$y0], [$x1,$y1] );
+        my $result =
+            any { my $p = $_; all { polygon_contains_point($_, $p) } @points }
+            @{ $self->{poly} };
+        return 0 + $result;
+    }
 
     # lays in defferent subparts 
     my $i0 = min( floor( ($x0-$xmin) / $self->{x_size} ), $self->{x_parts}-1 );
@@ -256,10 +302,10 @@ sub contains_bbox_rough {
 
 
 sub contains_polygon_rough {
-    my ($self, $poly) = @_; 
+    my ($self, $poly, %opt) = @_; 
     croak "Polygon should be a reference to array of points" if ref $poly ne 'ARRAY';
 
-    return $self->contains_bbox_rough( polygon_bbox($poly) );
+    return $self->contains_bbox_rough( polygon_bbox( $poly, (%opt ? \%opt : ()) ) );
 }
 
 
@@ -383,7 +429,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.062
+version 0.065
 
 =head1 SYNOPSIS
 
@@ -410,12 +456,16 @@ Contour is an arrayref of points:
 
     my $poly1 = [ [0,0], [0,2], [2,2], ... ];   
     ...
-    my $bound = Math::Polygon::Tree->new( $poly1, $poly2, ... );
+    my $bound = Math::Polygon::Tree->new( $poly1, $poly2, ..., \%opt );
 
 or a .poly file
 
     my $bound1 = Math::Polygon::Tree->new( \*STDIN );
     my $bound2 = Math::Polygon::Tree->new( 'boundary.poly' );
+
+Options:
+
+    prepare_rough
 
 =head2 contains
 
@@ -440,12 +490,16 @@ Returns 1 if all points are inside polygon, 0 if all outside, or B<undef> otherw
 
 =head2 contains_bbox_rough
 
+    my $bbox = [ 1, 1, 2, 2 ];
+    if ( $bound->contains_bbox_rough( $bbox, \%opt ) )  { ... }
+
 Rough check if box is inside bound polygon.
 
-Returns 1 if box is inside polygon, 0 if box is outside polygon or B<undef> if it 'doubts'. 
+Returns 1 if box is inside polygon, 0 if box is outside polygon or B<undef> if it 'doubts'.
 
-    my $bbox = [ 1, 1, 2, 2 ];
-    if ( $bound->contains_bbox_rough( $bbox ) )  { ... }
+Options:
+
+    inaccurate - allow false positive results
 
 =head2 contains_polygon_rough
 
