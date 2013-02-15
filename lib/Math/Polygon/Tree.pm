@@ -1,6 +1,6 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.067';
+  $Math::Polygon::Tree::VERSION = '0.068';
 }
 
 # ABSTRACT: fast check if point is inside polygon
@@ -282,7 +282,7 @@ sub contains_bbox_rough {
     my ($xmin, $ymin, $xmax, $ymax) = @{$self->{bbox}};
 
     # completely outside bbox
-    return 0       if    $x1 < $xmin  ||  $x0 > $xmax  ||  $y0 < $ymin  ||  $y1 > $ymax;
+    return 0       if    $x1 < $xmin  ||  $x0 > $xmax  ||  $y1 < $ymin  ||  $y0 > $ymax;
 
     # partly inside
     return undef   if !( $x0 >= $xmin  &&  $x1 <= $xmax  &&  $y0 >= $ymin  &&  $y1 <= $ymax );
@@ -446,7 +446,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.067
+version 0.068
 
 =head1 SYNOPSIS
 
