@@ -4,6 +4,8 @@ MANIFEST
 META.yml
 Makefile.PL
 README
+a.out
+a.par
 dist.ini
 lib/Math/Polygon/Tree.pm
 t/bbox_union.t

@@ -1,11 +1,11 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.068';
+  $Math::Polygon::Tree::VERSION = '0.069';
 }
 
 # ABSTRACT: fast check if point is inside polygon
 
-# $Id: Tree.pm 23 2013-02-12 14:01:52Z xliosha@gmail.com $
+# $Id: Tree.pm 25 2013-05-15 07:18:04Z xliosha@gmail.com $
 
 
 use 5.010;
@@ -21,8 +21,22 @@ use List::MoreUtils qw{ all any };
 use POSIX qw/ floor ceil /;
 
 # todo: remove gpc and use simple bbox clip
-use Math::Geometry::Planar::GPC::Polygon qw{ new_gpc };
+our $CLIPPER_CLASS;
+BEGIN {
+    my @clippers = qw/
+        Math::Geometry::Planar::GPC::Polygon
+        Math::Geometry::Planar::GPC::PolygonXS
+    /;
 
+    for my $class ( @clippers ) {
+        eval "require $class"  or next;
+        $CLIPPER_CLASS = $class;
+        last;
+    }
+
+    croak "No clipper class available" if !$CLIPPER_CLASS;
+}
+    
 
 
 our @EXPORT_OK = qw{
@@ -141,7 +155,7 @@ sub new {
     # slice
     my $subparts = $self->{subparts} = [];
     
-    my $gpc_poly = new_gpc();
+    my $gpc_poly = $CLIPPER_CLASS->new_gpc();
     $gpc_poly->add_polygon( $_, 0 )  for @contours;
     
     for my $j ( 0 .. $y_parts-1 ) {
@@ -152,7 +166,7 @@ sub new {
             my $x1 = $xmin + ($i+1+$SLICE_FIELD)*$x_size;
             my $y1 = $ymin + ($j+1+$SLICE_FIELD)*$y_size;
 
-            my $gpc_slice = new_gpc();
+            my $gpc_slice = $CLIPPER_CLASS->new_gpc();
             $gpc_slice->add_polygon([ [$x0,$y0],  [$x0,$y1], [$x1,$y1], [$x1,$y0], [$x0,$y0] ], 0);
 
             my @slice_parts = $gpc_poly->clip_to($gpc_slice, 'INTERSECT')->get_polygons();
@@ -446,7 +460,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.068
+version 0.069
 
 =head1 SYNOPSIS
 
