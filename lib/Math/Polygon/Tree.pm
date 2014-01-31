@@ -1,11 +1,11 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.069';
+  $Math::Polygon::Tree::VERSION = '0.0691';
 }
 
 # ABSTRACT: fast check if point is inside polygon
 
-# $Id: Tree.pm 25 2013-05-15 07:18:04Z xliosha@gmail.com $
+# $Id: Tree.pm 26 2014-01-31 05:55:51Z xliosha@gmail.com $
 
 
 use 5.010;
@@ -75,7 +75,7 @@ sub new {
         }
 
         my @points = @$contour;
-        push @points, $points[0]  if !( $points[0] ~~ $points[-1] );
+        push @points, $points[0]  if !( $points[0]->[0] == $points[-1]->[0] && $points[0]->[1] == $points[-1]->[1] );
 
         push @contours, \@points;
 
@@ -101,8 +101,8 @@ sub new {
                     if (
                            $c->[$h]->[1] == $c->[$i]->[1]
                         && $c->[$k]->[1] == $c->[$j]->[1]
-                        && $c->[$i]->[1] ~~ [$y0, $y1]
-                        && $c->[$j]->[1] ~~ [$y0, $y1]
+                        && ($c->[$i]->[1] == $y0 || $c->[$i]->[1] == $y1)
+                        && ($c->[$j]->[1] == $y0 || $c->[$j]->[1] == $y1)
                     ) {
                         # left edge
                         if ( $c->[$i]->[0] == $x0 && $c->[$j]->[0] == $x0 ) {
@@ -119,8 +119,8 @@ sub new {
                     if (
                            $c->[$h]->[0] == $c->[$i]->[0]
                         && $c->[$k]->[0] == $c->[$j]->[0]
-                        && $c->[$i]->[0] ~~ [$x0, $x1]
-                        && $c->[$j]->[0] ~~ [$x0, $x1]
+                        && ($c->[$i]->[0] == $x0 || $c->[$i]->[0] == $x1)
+                        && ($c->[$j]->[0] == $x0 || $c->[$j]->[0] == $x1)
                     ) {
                         # lower edge
                         if ( $c->[$i]->[1] == $y0 && $c->[$j]->[1] == $y0 ) {
@@ -180,7 +180,7 @@ sub new {
             # filled part
             if (
                 @slice_parts == 1 && @{$slice_parts[0]} == 4
-                && all { $_->[0] ~~ [$x0,$x1] && $_->[1] ~~ [$y0,$y1] } @{$slice_parts[0]}
+                && all { ($_->[0]==$x0 || $_->[0]==$x1) && ($_->[1]==$y0 || $_->[1]==$y1) } @{$slice_parts[0]}
             ) {
                 $subparts->[$i]->[$j] = 1;
                 next;
@@ -450,8 +450,8 @@ sub polygon_contains_point {
 
 1;
 
-
 __END__
+
 =pod
 
 =head1 NAME
@@ -460,7 +460,7 @@ Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.069
+version 0.0691
 
 =head1 SYNOPSIS
 
@@ -597,4 +597,3 @@ This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-
