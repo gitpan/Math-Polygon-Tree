@@ -1,11 +1,11 @@
 package Math::Polygon::Tree;
 {
-  $Math::Polygon::Tree::VERSION = '0.0691';
+  $Math::Polygon::Tree::VERSION = '0.07';
 }
 
 # ABSTRACT: fast check if point is inside polygon
 
-# $Id: Tree.pm 26 2014-01-31 05:55:51Z xliosha@gmail.com $
+# $Id: Tree.pm 27 2014-09-03 08:08:31Z xliosha@gmail.com $
 
 
 use 5.010;
@@ -24,8 +24,8 @@ use POSIX qw/ floor ceil /;
 our $CLIPPER_CLASS;
 BEGIN {
     my @clippers = qw/
-        Math::Geometry::Planar::GPC::Polygon
         Math::Geometry::Planar::GPC::PolygonXS
+        Math::Geometry::Planar::GPC::Polygon
     /;
 
     for my $class ( @clippers ) {
@@ -454,13 +454,15 @@ __END__
 
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
 Math::Polygon::Tree - fast check if point is inside polygon
 
 =head1 VERSION
 
-version 0.0691
+version 0.07
 
 =head1 SYNOPSIS
 
